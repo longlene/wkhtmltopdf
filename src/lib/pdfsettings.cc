@@ -41,17 +41,17 @@ struct DLL_LOCAL ReflectImpl<UnitReal>: public ReflectSimple {
 };
 
 template<>
-struct DLL_LOCAL ReflectImpl<QPrinter::PageSize>: public ReflectSimple {
-	QPrinter::PageSize & ps;
-	ReflectImpl(QPrinter::PageSize & _): ps(_) {}
+struct DLL_LOCAL ReflectImpl<QPageSize::PageSizeId>: public ReflectSimple {
+	QPageSize::PageSizeId & ps;
+	ReflectImpl(QPageSize::PageSizeId & _): ps(_) {}
 	QString get() {return pageSizeToStr(ps);}
 	void set(const QString & value, bool * ok) {ps = strToPageSize(value.toUtf8().constData(), ok);}
 };
 
 template<>
-struct DLL_LOCAL ReflectImpl<QPrinter::Orientation>: public ReflectSimple {
-	QPrinter::Orientation & o;
-	ReflectImpl(QPrinter::Orientation & _): o(_) {}
+struct DLL_LOCAL ReflectImpl<QPageLayout::Orientation>: public ReflectSimple {
+	QPageLayout::Orientation & o;
+	ReflectImpl(QPageLayout::Orientation & _): o(_) {}
 	QString get() {return orientationToStr(o);}
 	void set(const QString & value, bool * ok) {o = strToOrientation(value.toUtf8().constData(), ok);}
 };
@@ -172,82 +172,70 @@ struct DLL_LOCAL ReflectImpl<PdfObject>: public ReflectClass {
   \file settings.hh
   \brief Defines the Settings class
 */
-DLL_LOCAL QMap<QString, QPrinter::PageSize> pageSizeMap() {
-	QMap<QString, QPrinter::PageSize> res;
-	res["A0"] = QPrinter::A0;
-	res["A1"] = QPrinter::A1;
-	res["A2"] = QPrinter::A2;
-	res["A3"] = QPrinter::A3;
-	res["A4"] = QPrinter::A4;
-	res["A5"] = QPrinter::A5;
-	res["A6"] = QPrinter::A6;
-	res["A7"] = QPrinter::A7;
-	res["A8"] = QPrinter::A8;
-	res["A9"] = QPrinter::A9;
-	res["B0"] = QPrinter::B0;
-	res["B1"] = QPrinter::B1;
-	res["B10"] = QPrinter::B10;
-	res["B2"] = QPrinter::B2;
-	res["B3"] = QPrinter::B3;
-	res["B4"] = QPrinter::B4;
-	res["B5"] = QPrinter::B5;
-	res["B6"] = QPrinter::B6;
-	res["B7"] = QPrinter::B7;
-	res["B8"] = QPrinter::B8;
-	res["B9"] = QPrinter::B9;
-	res["C5E"] = QPrinter::C5E;
-	res["Comm10E"] = QPrinter::Comm10E;
-	res["DLE"] = QPrinter::DLE;
-	res["Executive"] = QPrinter::Executive;
-	res["Folio"] = QPrinter::Folio;
-	res["Ledger"] = QPrinter::Ledger;
-	res["Legal"] = QPrinter::Legal;
-	res["Letter"] = QPrinter::Letter;
-	res["Tabloid"] = QPrinter::Tabloid;
+DLL_LOCAL QMap<QString, QPageSize::PageSizeId> pageSizeMap() {
+	QMap<QString, QPageSize::PageSizeId> res;
+	res["A0"] = QPageSize::A0;
+	res["A1"] = QPageSize::A1;
+	res["A2"] = QPageSize::A2;
+	res["A3"] = QPageSize::A3;
+	res["A4"] = QPageSize::A4;
+	res["A5"] = QPageSize::A5;
+	res["A6"] = QPageSize::A6;
+	res["A7"] = QPageSize::A7;
+	res["A8"] = QPageSize::A8;
+	res["A9"] = QPageSize::A9;
+	res["B0"] = QPageSize::B0;
+	res["B1"] = QPageSize::B1;
+	res["B10"] = QPageSize::B10;
+	res["B2"] = QPageSize::B2;
+	res["B3"] = QPageSize::B3;
+	res["B4"] = QPageSize::B4;
+	res["B5"] = QPageSize::B5;
+	res["B6"] = QPageSize::B6;
+	res["B7"] = QPageSize::B7;
+	res["B8"] = QPageSize::B8;
+	res["B9"] = QPageSize::B9;
+	res["C5E"] = QPageSize::C5E;
+	res["Comm10E"] = QPageSize::Comm10E;
+	res["DLE"] = QPageSize::DLE;
+	res["Executive"] = QPageSize::Executive;
+	res["Folio"] = QPageSize::Folio;
+	res["Ledger"] = QPageSize::Ledger;
+	res["Legal"] = QPageSize::Legal;
+	res["Letter"] = QPageSize::Letter;
+	res["Tabloid"] = QPageSize::Tabloid;
 	return res;
 }
 
-/*!
-  Convert a string to a paper size, basically all thinkable values are allowed.
-  if a unknown value is given A4 is returned
-  \param s The string to convert
-  \param ok If supplied indicates if the conversion was successful
-*/
-QPrinter::PageSize strToPageSize(const char * s, bool * ok) {
-	QMap<QString,QPrinter::PageSize> map = pageSizeMap();
-	for (QMap<QString,QPrinter::PageSize>::const_iterator i=map.begin(); i != map.end(); ++i) {
+QPageSize::PageSizeId strToPageSize(const char * s, bool * ok) {
+	QMap<QString, QPageSize::PageSizeId> map = pageSizeMap();
+	for (auto i = map.begin(); i != map.end(); ++i) {
 		if (i.key().compare(s, Qt::CaseInsensitive) != 0) continue;
-		if (ok) *ok=true;
+		if (ok) *ok = true;
 		return i.value();
 	}
 	if (ok) *ok = false;
-	return QPrinter::A4;
+	return QPageSize::A4;
 }
 
-QString pageSizeToStr(QPrinter::PageSize ps) {
-	QMap<QString,QPrinter::PageSize> map = pageSizeMap();
-	for (QMap<QString,QPrinter::PageSize>::const_iterator i=map.begin(); i != map.end(); ++i) {
+QString pageSizeToStr(QPageSize::PageSizeId ps) {
+	QMap<QString, QPageSize::PageSizeId> map = pageSizeMap();
+	for (auto i = map.begin(); i != map.end(); ++i) {
 		if (i.value() == ps) return i.key();
 	}
 	return "";
 }
 
-
-/*!
-  Read orientation from a string, possible values are landscape and portrait (case insensitive)
-  \param s The string containing the orientation
-  \param ok If supplied indicates whether the s was valid
-*/
-QPrinter::Orientation strToOrientation(const char * s, bool * ok) {
+QPageLayout::Orientation strToOrientation(const char * s, bool * ok) {
 	if (ok) *ok = true;
- 	if (!strcasecmp(s,"Landscape")) return QPrinter::Landscape;
- 	if (!strcasecmp(s,"Portrait")) return QPrinter::Portrait;
+	if (!strcasecmp(s, "Landscape")) return QPageLayout::Landscape;
+	if (!strcasecmp(s, "Portrait"))  return QPageLayout::Portrait;
 	if (ok) *ok = false;
-	return QPrinter::Portrait;
+	return QPageLayout::Portrait;
 }
 
-QString orientationToStr(QPrinter::Orientation o) {
-	return (o == QPrinter::Landscape)?"Landscape":"Portrait";
+QString orientationToStr(QPageLayout::Orientation o) {
+	return (o == QPageLayout::Landscape) ? "Landscape" : "Portrait";
 }
 
 
@@ -349,7 +337,7 @@ QString colorModeToStr(QPrinter::ColorMode o) {
 }
 
 Size::Size():
-	pageSize(QPrinter::A4),
+	pageSize(QPageSize::A4),
 	height(UnitReal(-1,QPrinter::Millimeter)),
 	width(UnitReal(-1,QPrinter::Millimeter)) {}
 
@@ -373,7 +361,7 @@ PdfGlobal::PdfGlobal():
 	logLevel(Info),
 	useGraphics(false),
 	resolveRelativeLinks(true),
-	orientation(QPrinter::Portrait),
+	orientation(QPageLayout::Portrait),
 	colorMode(QPrinter::Color),
 	resolution(QPrinter::HighResolution),
 	dpi(96),

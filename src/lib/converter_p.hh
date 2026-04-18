@@ -24,7 +24,8 @@
 #include "converter.hh"
 #include "websettings.hh"
 #include <QFile>
-#include <QWebSettings>
+#include <QWebEngineSettings>
+#include <QWebEnginePage>
 
 #include "dllbegin.inc"
 
@@ -47,7 +48,7 @@ protected:
 
 	bool conversionDone;
 
-	void updateWebSettings(QWebSettings * ws, const settings::Web & s) const;
+	void updateWebSettings(QWebEnginePage * page, const settings::Web & s) const;
 public slots:
 	void fail();
 	void loadProgress(int progress);

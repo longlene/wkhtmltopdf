@@ -15,22 +15,13 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with wkhtmltopdf.  If not, see <http:#www.gnu.org/licenses/>.
 
-CONFIG(static, shared|static):lessThan(QT_MAJOR_VERSION, 5) {
-    DEFINES  += QT4_STATICPLUGIN_TEXTCODECS
-    QTPLUGIN += qcncodecs qjpcodecs qkrcodecs qtwcodecs
-}
-
 INCLUDEPATH += ../../src/lib
 RESOURCES    = $$PWD/wkhtmltopdf.qrc
 
 win32:      CONFIG += console
 win32-g++*: QMAKE_LFLAGS += -static -static-libgcc -static-libstdc++
 
-QT += webkit network xmlpatterns svg
-greaterThan(QT_MAJOR_VERSION, 4) {
-    QT += webkitwidgets
-    greaterThan(QT_MINOR_VERSION, 2): QT += printsupport
-}
+QT += webenginecore webenginewidgets svg printsupport widgets
 
 # version related information
 VERSION_TEXT=$$(WKHTMLTOX_VERSION)

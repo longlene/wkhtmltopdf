@@ -20,7 +20,6 @@
 
 #include "imagecommandlineparser.hh"
 #include "outputter.hh"
-#include <QWebFrame>
 
 #define STRINGIZE_(x) #x
 #define STRINGIZE(x) STRINGIZE_(x)

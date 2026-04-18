@@ -30,7 +30,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkCookieJar>
 #include <QNetworkReply>
-#include <QWebFrame>
 
 #include "dllbegin.inc"
 namespace wkhtmltopdf {
@@ -66,21 +65,6 @@ signals:
 class DLL_LOCAL MultiPageLoaderPrivate;
 class DLL_LOCAL ResourceObject;
 
-class DLL_LOCAL MyQWebPage: public QWebPage {
-	Q_OBJECT ;
-private:
-	ResourceObject & resource;
-public:
-	MyQWebPage(ResourceObject & res);
-	virtual void javaScriptAlert(QWebFrame * frame, const QString & msg);
-	virtual bool javaScriptConfirm(QWebFrame * frame, const QString & msg);
-	virtual bool javaScriptPrompt(QWebFrame * frame, const QString & msg, const QString & defaultValue, QString * result);
-	virtual void javaScriptConsoleMessage(const QString & message, int lineNumber, const QString & sourceID);
-	virtual QString overrideMediaType() const;
-public slots:
-	bool shouldInterruptJavaScript();
-};
-
 class DLL_LOCAL ResourceObject: public QObject {
 	Q_OBJECT
 private:
@@ -94,7 +78,7 @@ private:
 	MultiPageLoaderPrivate & multiPageLoader;
 public:
 	ResourceObject(MultiPageLoaderPrivate & mpl, const QUrl & u, const settings::LoadPage & s);
-	MyQWebPage webPage;
+	QWebEnginePage webPage;
 	LoaderObject lo;
 	int httpErrorCode;
 	const settings::LoadPage settings;
@@ -104,14 +88,13 @@ public slots:
 	void loadProgress(int progress);
 	void loadFinished(bool ok);
 	void waitWindowStatus();
-	void printRequested(QWebFrame * frame);
+	void printRequested();
 	void loadDone();
-	void handleAuthenticationRequired(QNetworkReply *reply, QAuthenticator *authenticator);
+	void handleAuthenticationRequired(const QUrl &requestUrl, QAuthenticator *authenticator);
 	void debug(const QString & str);
 	void info(const QString & str);
 	void warning(const QString & str);
 	void error(const QString & str);
-	void sslErrors(QNetworkReply *reply, const QList<QSslError> &);
 	void amfinished(QNetworkReply * reply);
 };
 

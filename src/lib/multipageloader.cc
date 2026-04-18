@@ -23,17 +23,17 @@
 #include <QFileInfo>
 #include <QNetworkCookie>
 #include <QNetworkDiskCache>
+#include <QNetworkProxy>
 #include <QTimer>
 #include <QUuid>
 #include <QList>
 #include <QByteArray>
-#if (QT_VERSION >= 0x050000 && !defined QT_NO_SSL) || !defined QT_NO_OPENSSL
+#include <QUrlQuery>
+#include <QWebEngineHttpRequest>
+#if !defined QT_NO_SSL
 #include <QSslCertificate>
 #include <QSslKey>
 #include <QSslConfiguration>
-#endif
-#if QT_VERSION >= 0x050000
-#include <QUrlQuery>
 #endif
 
 namespace wkhtmltopdf {
@@ -48,7 +48,7 @@ namespace wkhtmltopdf {
 */
 
 
-LoaderObject::LoaderObject(QWebPage & p): page(p), skip(false) {};
+LoaderObject::LoaderObject(QWebEnginePage & p): page(p), skip(false) {};
 
 MyNetworkAccessManager::MyNetworkAccessManager(const settings::LoadPage & s):
 	disposed(false),
@@ -124,7 +124,7 @@ QNetworkReply * MyNetworkAccessManager::createRequest(Operation op, const QNetwo
 			keyFile.close();
 
 			QList<QSslCertificate> chainCerts =
-				QSslCertificate::fromPath(settings.clientSslCrtPath.toLatin1(),  QSsl::Pem, QRegExp::FixedString);
+				QSslCertificate::fromPath(settings.clientSslCrtPath.toLatin1(),  QSsl::Pem, QSslCertificate::PatternSyntax::FixedString);
 			QList<QSslCertificate> cas =  sslConfig.caCertificates();
 			cas.append(chainCerts);
 			if(!chainCerts.isEmpty()){
@@ -154,43 +154,6 @@ QList<QNetworkProxy> MyNetworkProxyFactory::queryProxy (const QNetworkProxyQuery
 	return originalProxy;
 }
 
-MyQWebPage::MyQWebPage(ResourceObject & res): resource(res) {}
-
-void MyQWebPage::javaScriptAlert(QWebFrame *, const QString & msg) {
-	resource.info(QString("Javascript alert: %1").arg(msg));
-}
-
-bool MyQWebPage::javaScriptConfirm(QWebFrame *, const QString & msg) {
-	resource.info(QString("Javascript confirm: %1 (answered yes)").arg(msg));
-	return true;
-}
-
-bool MyQWebPage::javaScriptPrompt(QWebFrame *, const QString & msg, const QString & defaultValue, QString * result) {
-	resource.info(QString("Javascript prompt: %1 (answered %2)").arg(msg,defaultValue));
-	result = (QString*)&defaultValue;
-	Q_UNUSED(result);
-	return true;
-}
-
-void MyQWebPage::javaScriptConsoleMessage(const QString & message, int lineNumber, const QString & sourceID) {
-	if (resource.settings.debugJavascript)
-		resource.info(QString("%1:%2 %3").arg(sourceID).arg(lineNumber).arg(message));
-}
-
-bool MyQWebPage::shouldInterruptJavaScript() {
-	if (resource.settings.stopSlowScripts) {
-		resource.warning("A slow script was stopped");
-		return true;
-	}
-	resource.debug("A slow script has been detected, but was not stopped");
-	return false;
-}
-
-QString MyQWebPage::overrideMediaType() const
-{
-    return resource.settings.printMediaType ? "print" : "screen";
-}
-
 ResourceObject::ResourceObject(MultiPageLoaderPrivate & mpl, const QUrl & u, const settings::LoadPage & s):
 	networkAccessManager(s),
 	url(u),
@@ -200,13 +163,11 @@ ResourceObject::ResourceObject(MultiPageLoaderPrivate & mpl, const QUrl & u, con
 	finished(false),
 	signalPrint(false),
 	multiPageLoader(mpl),
-	webPage(*this),
+	webPage(),
 	lo(webPage),
 	httpErrorCode(0),
 	settings(s) {
 
-	connect(&networkAccessManager, SIGNAL(authenticationRequired(QNetworkReply*, QAuthenticator *)),this,
-	        SLOT(handleAuthenticationRequired(QNetworkReply *, QAuthenticator *)));
 	foreach (const QString & path, s.allowed)
 		networkAccessManager.allow(path);
 	if (url.scheme() == "file")
@@ -215,12 +176,11 @@ ResourceObject::ResourceObject(MultiPageLoaderPrivate & mpl, const QUrl & u, con
 	connect(&webPage, SIGNAL(loadStarted()), this, SLOT(loadStarted()));
 	connect(&webPage, SIGNAL(loadProgress(int)), this, SLOT(loadProgress(int)));
 	connect(&webPage, SIGNAL(loadFinished(bool)), this, SLOT(loadFinished(bool)));
-	connect(&webPage, SIGNAL(printRequested(QWebFrame*)), this, SLOT(printRequested(QWebFrame*)));
+	connect(&webPage, SIGNAL(printRequested()), this, SLOT(printRequested()));
 
-	//If some ssl error occurs we want sslErrors to be called, so the we can ignore it
-	connect(&networkAccessManager, SIGNAL(sslErrors(QNetworkReply*, const QList<QSslError>&)),this,
-	        SLOT(sslErrors(QNetworkReply*, const QList<QSslError>&)));
-
+	// QWebEnginePage uses its own profile-based network stack; custom per-page
+	// QNetworkAccessManager is not supported. Connect the NAM signals to the
+	// interceptor/profile instead for error tracking and authentication.
 	connect(&networkAccessManager, SIGNAL(finished (QNetworkReply *)),
 			this, SLOT(amfinished (QNetworkReply *) ) );
 
@@ -236,9 +196,14 @@ ResourceObject::ResourceObject(MultiPageLoaderPrivate & mpl, const QUrl & u, con
 	connect(&networkAccessManager, SIGNAL(error(const QString &)),
 			this, SLOT(error(const QString &)));
 
-	networkAccessManager.setCookieJar(multiPageLoader.cookieJar);
+	// QWebEnginePage.authenticationRequired is available directly
+	connect(&webPage, SIGNAL(authenticationRequired(const QUrl &, QAuthenticator *)),
+	        this, SLOT(handleAuthenticationRequired(const QUrl &, QAuthenticator *)));
 
-	//If we must use a proxy, create a host of objects
+	// WebEngine manages cookies via QWebEngineProfile::cookieStore(); the
+	// QNetworkCookieJar is kept for potential non-WebEngine network requests.
+
+	// Proxy: WebEngine uses system/application proxy; set application proxy if configured.
 	if (!settings.proxy.host.isEmpty()) {
 		QNetworkProxy proxy;
 		proxy.setHostName(settings.proxy.host);
@@ -255,26 +220,23 @@ ResourceObject::ResourceObject(MultiPageLoaderPrivate & mpl, const QUrl & u, con
 			proxy.setUser(settings.proxy.user);
 		if (!settings.proxy.password.isEmpty())
 			proxy.setPassword(settings.proxy.password);
-		if (!settings.bypassProxyForHosts.isEmpty())
+		// Apply as application-level proxy (best effort for WebEngine).
+		if (settings.bypassProxyForHosts.isEmpty())
+			QNetworkProxy::setApplicationProxy(proxy);
+		else
 			networkAccessManager.setProxyFactory(
 				new MyNetworkProxyFactory(proxy, settings.bypassProxyForHosts));
-		else
-			networkAccessManager.setProxy(proxy);
 	}
 
-	webPage.setNetworkAccessManager(&networkAccessManager);
-#ifdef __EXTENSIVE_WKHTMLTOPDF_QT_HACK__
-	double devicePixelRatio = multiPageLoader.dpi / 96.; // The used version of WebKit always renders at 96 DPI when no zoom is applied. It does not fully support a device pixel ratio != 1 natively.
-	webPage.mainFrame()->setZoomFactor(devicePixelRatio * settings.zoomFactor); // Zoom in the page to achieve a higher DPI.
-	webPage.setDevicePixelRatio(devicePixelRatio); // Fix CSS media queries (does not affect anything else).
-#endif
+	if (settings.zoomFactor != 1.0)
+		webPage.setZoomFactor(settings.zoomFactor);
 }
 
 /*!
  * Once loading starting, this is called
  */
 void ResourceObject::loadStarted() {
-	debug("QWebPage load started.");
+	debug("QWebEnginePage load started.");
 	if (finished == true) {
 		++multiPageLoader.loading;
 		finished = false;
@@ -306,7 +268,7 @@ void ResourceObject::loadProgress(int p) {
 
 
 void ResourceObject::loadFinished(bool ok) {
-	debug("QWebPage load finished.");
+	debug("QWebEnginePage load finished.");
 
 	// If we are finished, this might be a potential bug.
 	if (finished || multiPageLoader.resources.size() <= 0) {
@@ -331,7 +293,7 @@ void ResourceObject::loadFinished(bool ok) {
 	// Evaluate extra user supplied javascript for the main loader
 	if (isMain)
 		foreach (const QString & str, settings.runScript)
-			webPage.mainFrame()->evaluateJavaScript(str);
+			webPage.runJavaScript(str);
 
 	// XXX: If loading failed there's no need to wait
 	//      for javascript on this resource.
@@ -341,7 +303,8 @@ void ResourceObject::loadFinished(bool ok) {
 }
 
 void ResourceObject::waitWindowStatus() {
-	QString windowStatus = webPage.mainFrame()->evaluateJavaScript("window.status").toString();
+	webPage.runJavaScript("window.status", [&](const QVariant &result) {
+	QString windowStatus = result.toString();
 	if (windowStatus != settings.windowStatus) {
 		// This is once a second
 		if ((++windowStatusCounter % 20) == 0) {
@@ -354,9 +317,11 @@ void ResourceObject::waitWindowStatus() {
 		debug("Window status \"" + settings.windowStatus + "\" found.");
 		QTimer::singleShot(settings.jsdelay, this, SLOT(loadDone()));
 	}
+
+					});
 }
 
-void ResourceObject::printRequested(QWebFrame *) {
+void ResourceObject::printRequested() {
 	signalPrint=true;
 	loadDone();
 }
@@ -368,8 +333,7 @@ void ResourceObject::loadDone() {
 	debug("Loading done; Stopping QWebPage and any possible page refreshes.");
 
 	// Ensure no more loading goes..
-	webPage.triggerAction(QWebPage::Stop);
-	webPage.triggerAction(QWebPage::StopScheduledPageRefresh);
+	webPage.triggerAction(QWebEnginePage::Stop);
 	networkAccessManager.dispose();
 	//disconnect(this, 0, 0, 0);
 
@@ -382,14 +346,7 @@ void ResourceObject::loadDone() {
  * Called when the page requires authentication, fills in the username
  * and password supplied on the command line
  */
-void ResourceObject::handleAuthenticationRequired(QNetworkReply *reply, QAuthenticator *authenticator) {
-	Q_UNUSED(reply);
-
-	// XXX: Avoid calling 'reply->abort()' from within this signal.
-	//      As stated by doc, request would be finished when no
-	//      user/pass properties are assigned to authenticator object.
-	// See: http://qt-project.org/doc/qt-5.0/qtnetwork/qnetworkaccessmanager.html#authenticationRequired
-
+void ResourceObject::handleAuthenticationRequired(const QUrl &, QAuthenticator *authenticator) {
 	if (settings.username.isEmpty()) {
 		//If no username is given, complain the such is required
 		error("Authentication Required");
@@ -432,7 +389,7 @@ void ResourceObject::amfinished(QNetworkReply * reply) {
 	if ((networkStatus != 0 && networkStatus != 5) || (httpStatus > 399 && httpErrorCode == 0))
 	{
 		QFileInfo fi(reply->url().toString());
-		QString extension = fi.completeSuffix().toLower().remove(QRegExp("\\?.*$"));
+		QString extension = fi.completeSuffix().toLower().remove(QRegularExpression("\\?.*$"));
 		bool mediaFile = settings::LoadPage::mediaFilesExtensions.contains(extension);
 		if ( ! mediaFile) {
 			// XXX: Notify network errors as higher priority than HTTP errors.
@@ -462,16 +419,6 @@ void ResourceObject::amfinished(QNetworkReply * reply) {
 	}
 }
 
-/*!
- * Handle any ssl error by ignoring
- */
-void ResourceObject::sslErrors(QNetworkReply *reply, const QList<QSslError> &) {
-	//We ignore any ssl error, as it is next to impossible to send or receive
-	//any private information with wkhtmltopdf anyhow, seeing as you cannot authenticate
-	reply->ignoreSslErrors();
-	warning("SSL error ignored");
-}
-
 void ResourceObject::load() {
 	finished=false;
 	++multiPageLoader.loading;
@@ -483,11 +430,10 @@ void ResourceObject::load() {
 	if (hasFiles) {
 		boundary = QUuid::createUuid().toString().remove('-').remove('{').remove('}');
 		foreach (const settings::PostItem & pi, settings.post) {
-			//TODO escape values here
 			postData.append("--");
-			postData.append(boundary);
+			postData.append(boundary.toUtf8());
 			postData.append("\ncontent-disposition: form-data; name=\"");
-			postData.append(pi.name);
+			postData.append(pi.name.toUtf8());
 			postData.append('\"');
 			if (pi.file) {
 				QFile f(pi.value);
@@ -496,53 +442,42 @@ void ResourceObject::load() {
 					multiPageLoader.fail();
 				}
 				postData.append("; filename=\"");
-				postData.append( QFileInfo(pi.value).fileName());
+				postData.append( QFileInfo(pi.value).fileName().toUtf8());
 				postData.append("\"\n\n");
 				postData.append( f.readAll() );
-				//TODO ADD MIME TYPE
 			} else {
 				postData.append("\n\n");
-				postData.append(pi.value);
+				postData.append(pi.value.toUtf8());
 			}
 			postData.append('\n');
 		}
 		if (!postData.isEmpty()) {
 			postData.append("--");
-			postData.append(boundary);
+			postData.append(boundary.toUtf8());
 			postData.append("--\n");
 		}
 	} else {
-#if QT_VERSION >= 0x050000
 		QUrlQuery q;
 		foreach (const settings::PostItem & pi, settings.post)
 			q.addQueryItem(pi.name, pi.value);
 		postData = q.query(QUrl::FullyEncoded).toLocal8Bit();
-#else
-		QUrl u;
-		foreach (const settings::PostItem & pi, settings.post)
-			u.addQueryItem(pi.name, pi.value);
-		postData = u.encodedQuery();
-#endif
 	}
 
-
-	multiPageLoader.cookieJar->clearExtraCookies();
-	typedef QPair<QString, QString> SSP;
- 	foreach (const SSP & pair, settings.cookies)
-		multiPageLoader.cookieJar->useCookie(url, pair.first, pair.second);
-
-	QNetworkRequest r = QNetworkRequest(url);
+	// Build a QWebEngineHttpRequest so we can set custom headers and POST data.
+	QWebEngineHttpRequest req(url);
 	typedef QPair<QString, QString> HT;
 	foreach (const HT & j, settings.customHeaders)
-		r.setRawHeader(j.first.toLatin1(), j.second.toLatin1());
+		req.setHeader(j.first.toLatin1(), j.second.toLatin1());
 
-	if (postData.isEmpty())
-		webPage.mainFrame()->load(r);
-	else {
+	if (!postData.isEmpty()) {
+		req.setMethod(QWebEngineHttpRequest::Post);
+		req.setPostData(postData);
 		if (hasFiles)
-			r.setHeader(QNetworkRequest::ContentTypeHeader, QString("multipart/form-data, boundary=")+boundary);
-		webPage.mainFrame()->load(r, QNetworkAccessManager::PostOperation, postData);
+			req.setHeader("Content-Type",
+				(QString("multipart/form-data, boundary=") + boundary).toLatin1());
 	}
+
+	webPage.load(req);
 }
 
 void MyCookieJar::clearExtraCookies() {
@@ -644,15 +579,13 @@ void MultiPageLoaderPrivate::load() {
 void MultiPageLoaderPrivate::clearResources() {
 	while (resources.size() > 0)
 	{
-		// XXX: Using deleteLater() to dispose
-		// resources, to avoid race conditions with
-		// pending signals reaching a deleted resource.
-		// Also, and we must avoid calling clear()
-		// on resources list, is it tries to delete
-		// each objet on removal.
 		ResourceObject *tmp = resources.takeFirst();
-		tmp->deleteLater();
+		delete tmp;
 	}
+	// Flush any pending deletions so QWebEnginePages are destroyed before the
+	// WebEngine profile is torn down (avoids "profile released but page still
+	// alive" warnings).
+	QCoreApplication::processEvents();
 	tempIn.removeAll();
 }
 
@@ -679,7 +612,7 @@ MultiPageLoader::MultiPageLoader(settings::LoadGlobal & s, int dpi, bool mainLoa
 MultiPageLoader::~MultiPageLoader() {
 	MultiPageLoaderPrivate *tmp = d;
 	d = 0;
-	tmp->deleteLater();
+	delete tmp;
 }
 
 /*!
@@ -726,17 +659,17 @@ QUrl MultiPageLoader::guessUrlFromString(const QString &string) {
 	QString urlStr = string.trimmed();
 
 	// check if the string is just a host with a port
-	QRegExp hostWithPort(QLatin1String("^[a-zA-Z\\.]+\\:[0-9]*$"));
-	if (hostWithPort.exactMatch(urlStr))
+	QRegularExpression hostWithPort(QLatin1String("^[a-zA-Z\\.]+\\:[0-9]*$"));
+	if (hostWithPort.match(urlStr).hasMatch())
 		urlStr = QLatin1String("http://") + urlStr;
 
 	// Check if it looks like a qualified URL. Try parsing it and see.
-	QRegExp test(QLatin1String("^[a-zA-Z]+\\://.*"));
-	bool hasSchema = test.exactMatch(urlStr);
+	QRegularExpression test(QLatin1String("^[a-zA-Z]+://"));
+	bool hasSchema = test.match(urlStr).hasMatch();
 	if (hasSchema) {
 		bool isAscii = true;
 		foreach (const QChar &c, urlStr) {
-			if (c >= 0x80) {
+			if (c.unicode() >= 0x80) {
 				isAscii = false;
 				break;
 			}

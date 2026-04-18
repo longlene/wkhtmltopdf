@@ -23,7 +23,6 @@
 #include <QCommonStyle>
 #include <QPainter>
 #include <QStyleOption>
-#include <QWebFrame>
 #include <QtPlugin>
 #include <cstdlib>
 #include <iostream>

@@ -23,14 +23,15 @@
 #include <QAuthenticator>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
+#include <QMarginsF>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QPair>
 #include <QPrintEngine>
 #include <QTimer>
-#include <QWebFrame>
-#include <QWebPage>
-#include <QWebSettings>
-#include <QXmlQuery>
+#include <QWebEnginePage>
 #include <algorithm>
 #include <qapplication.h>
 #include <qfileinfo.h>
@@ -48,7 +49,7 @@ using namespace wkhtmltopdf::settings;
 
 const qreal PdfConverter::millimeterToPointMultiplier = 3.779527559;
 
-DLL_LOCAL QMap<QWebPage *, PageObject *> PageObject::webPageToObject;
+DLL_LOCAL QMap<QWebEnginePage *, PageObject *> PageObject::webPageToObject;
 
 struct DLL_LOCAL StreamDumper {
 	QFile out;
@@ -56,7 +57,7 @@ struct DLL_LOCAL StreamDumper {
 
 	StreamDumper(const QString & path): out(path), stream(&out) {
 		out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
-		stream.setCodec("UTF-8");
+		// Qt6 QTextStream defaults to UTF-8
 	}
 };
 
@@ -212,7 +213,7 @@ void PdfConverterPrivate::beginConvert() {
 			o.loaderObject = pageLoader.addResource(s.page, s.load, &o.data);
 			o.page = &o.loaderObject->page;
 			PageObject::webPageToObject[o.page] = &o;
-			updateWebSettings(o.page->settings(), s.web);
+			updateWebSettings(o.page, s.web);
 		}
 	}
 
@@ -282,12 +283,14 @@ QPrinter * PdfConverterPrivate::createPrinter(const QString & tempFile) {
     printer->setResolution(settings.dpi);
 
     if ((settings.size.height.first != -1) && (settings.size.width.first != -1)) {
-        printer->setPaperSize(QSizeF(settings.size.width.first,settings.size.height.first + 100), settings.size.height.second);
+        printer->setPageSize(QPageSize(QSizeF(settings.size.width.first,
+                                              settings.size.height.first + 100),
+                                       static_cast<QPageSize::Unit>(settings.size.height.second)));
     } else {
-        printer->setPaperSize(settings.size.pageSize);
+        printer->setPageSize(QPageSize(settings.size.pageSize));
     }
 
-    printer->setOrientation(settings.orientation);
+    printer->setPageOrientation(settings.orientation);
     printer->setColorMode(settings.colorMode);
     printer->setCreator("wkhtmltopdf " STRINGIZE(FULL_VERSION));
 
@@ -378,22 +381,23 @@ void PdfConverterPrivate::pagesLoaded(bool ok) {
         maxHeaderHeight = std::max(maxHeaderHeight, o.headerReserveHeight);
         maxFooterHeight = std::max(maxFooterHeight, o.footerReserveHeight);
     }
-    printer->setPageMargins(settings.margin.left.first, maxHeaderHeight,
-                                settings.margin.right.first, maxFooterHeight,
-                                settings.margin.left.second);
+    printer->setPageMargins(QMarginsF(settings.margin.left.first, maxHeaderHeight,
+                                      settings.margin.right.first, maxFooterHeight),
+                            static_cast<QPageLayout::Unit>(settings.margin.left.second));
 #else
-    printer->setPageMargins(settings.margin.left.first, settings.margin.top.first,
-                                settings.margin.right.first, settings.margin.bottom.first,
-                                settings.margin.left.second);
+    printer->setPageMargins(QMarginsF(settings.margin.left.first, settings.margin.top.first,
+                                      settings.margin.right.first, settings.margin.bottom.first),
+                            static_cast<QPageLayout::Unit>(settings.margin.left.second));
 #endif
 
 	if ((settings.size.height.first != -1) && (settings.size.width.first != -1)) {
-		printer->setPaperSize(QSizeF(settings.size.width.first,settings.size.height.first), settings.size.height.second);
+		printer->setPageSize(QPageSize(QSizeF(settings.size.width.first, settings.size.height.first),
+		                               static_cast<QPageSize::Unit>(settings.size.height.second)));
 	} else {
-		printer->setPaperSize(settings.size.pageSize);
+		printer->setPageSize(QPageSize(settings.size.pageSize));
 	}
 
-	printer->setOrientation(settings.orientation);
+	printer->setPageOrientation(settings.orientation);
 	printer->setColorMode(settings.colorMode);
 	printer->setCreator("wkhtmltopdf " STRINGIZE(FULL_VERSION));
 
@@ -533,7 +537,7 @@ void PdfConverterPrivate::loadTocs() {
 		obj.loaderObject = tocLoader->addResource(htmlPath, ps.load);
 		obj.page = &obj.loaderObject->page;
 		PageObject::webPageToObject[obj.page] = &obj;
-		updateWebSettings(obj.page->settings(), ps.web);
+		updateWebSettings(obj.page, ps.web);
 		toc= true;
 	}
 
@@ -658,7 +662,7 @@ void PdfConverterPrivate::endPage(PageObject & object, bool hasHeaderFooter, int
 	//object.headers[objectPage];
 	if (currentHeader) {
 		QWebPage * header = currentHeader;
-		updateWebSettings(header->settings(), object.settings.web);
+		updateWebSettings(header, object.settings.web);
 		painter->save();
 		painter->resetTransform();
 		QPalette pal = header->palette();
@@ -690,7 +694,7 @@ void PdfConverterPrivate::endPage(PageObject & object, bool hasHeaderFooter, int
 
 	if (currentFooter) {
 		QWebPage * footer=currentFooter;
-		updateWebSettings(footer->settings(), object.settings.web);
+		updateWebSettings(footer, object.settings.web);
 		painter->save();
 		painter->resetTransform();
 		QPalette pal = footer->palette();
@@ -987,7 +991,20 @@ void PdfConverterPrivate::printDocument() {
 #ifndef __EXTENSIVE_WKHTMLTOPDF_QT_HACK__
 	currentPhase = 1;
 	emit out.phaseChanged();
-	objects[0].page->mainFrame()->print(printer);
+	// Qt WebEngine: use printToPdf() which renders via the Chromium engine.
+	// Derive a QPageLayout from the already-configured QPrinter.
+	{
+		QEventLoop loop;
+		objects[0].page->printToPdf([this, &loop](const QByteArray &pdfData) {
+			if (!pdfData.isEmpty()) {
+				QFile f(lout);
+				if (f.open(QIODevice::WriteOnly))
+					f.write(pdfData);
+			}
+			loop.quit();
+		}, printer->pageLayout());
+		loop.exec();
+	}
 	progressString = "";
 	emit out.progressChanged(-1);
 #else

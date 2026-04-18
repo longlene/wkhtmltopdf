@@ -22,18 +22,14 @@
 #include "imageconverter_p.hh"
 #include "imagesettings.hh"
 #include <QBuffer>
-#include <QDebug>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
 #include <QObject>
-#include <QObject>
 #include <QPainter>
 #include <QSvgGenerator>
 #include <QUrl>
-#include <QWebElement>
-#include <QWebFrame>
-#include <QWebPage>
+#include <QWebEngineView>
 #include <qapplication.h>
 
 #ifdef Q_OS_WIN32
@@ -68,9 +64,9 @@ void ImageConverterPrivate::beginConvert() {
 	errorCode = 0;
 	progressString = "0%";
 	loaderObject = loader.addResource(settings.in, settings.loadPage, &inputData);
-	updateWebSettings(loaderObject->page.settings(), settings.web);
+	updateWebSettings(&loaderObject->page, settings.web);
 	currentPhase=0;
-	emit out. phaseChanged();
+	emit out.phaseChanged();
 	loadProgress(0);
 	loader.load();
 }
@@ -86,8 +82,7 @@ void ImageConverterPrivate::pagesLoaded(bool ok) {
 		fail();
 		return;
 	}
-	// if fmt is empty try to get it from file extension in out
-	if (settings.fmt=="") {
+	if (settings.fmt == "") {
 		if (settings.out == "-")
 			settings.fmt = "jpg";
 		else {
@@ -96,134 +91,123 @@ void ImageConverterPrivate::pagesLoaded(bool ok) {
 		}
 	}
 
-	// check whether image format is supported (for writing)
-//	QImageWriter test;
-//	test.setFormat(settings.fmt);
-//	if (!test.canWrite()) {
-//		if (!settings.quiet)printf("error: file format not supported\n");
-//		httpErrorCode=DEFAULT;
-//		return false;
-//	}
-	// create webkit frame and load website
-
-	currentPhase=1;
-	emit out. phaseChanged();
+	currentPhase = 1;
+	emit out.phaseChanged();
 	loadProgress(0);
 
-	QWebFrame * frame = loaderObject->page.mainFrame();
-	loaderObject->page.mainFrame()->setScrollBarPolicy(Qt::Vertical, Qt::ScrollBarAlwaysOff);
+	QWebEnginePage & page = loaderObject->page;
+
+	// Determine initial width
+	int screenWidth = settings.screenWidth > 0 ? settings.screenWidth : 1024;
+
+	// Use JavaScript to get content dimensions asynchronously
+	QEventLoop dimLoop;
+	int contentWidth = screenWidth;
+	int contentHeight = 768;
+
+	page.runJavaScript("document.documentElement.scrollWidth", [&](const QVariant &v) {
+		contentWidth = v.toInt();
+		dimLoop.quit();
+	});
+	dimLoop.exec();
+
+	if (settings.smartWidth && contentWidth > screenWidth)
+		screenWidth = qMin(contentWidth, 32000);
+
+	page.runJavaScript("document.documentElement.scrollHeight", [&](const QVariant &v) {
+		contentHeight = v.toInt();
+		dimLoop.quit();
+	});
+	dimLoop.exec();
+
+	int screenHeight = settings.screenHeight > 0 ? settings.screenHeight : contentHeight;
+	if (screenHeight < 1) screenHeight = 1;
 
 	loadProgress(25);
-	// Calculate a good width for the image
-	int highWidth=settings.screenWidth;
-	loaderObject->page.setViewportSize(QSize(highWidth, 10));
-	if (settings.smartWidth && frame->scrollBarMaximum(Qt::Horizontal) > 0) {
-		if (highWidth < 10) highWidth=10;
-		int lowWidth=highWidth;
-		while (frame->scrollBarMaximum(Qt::Horizontal) > 0 && highWidth < 32000) {
-			lowWidth = highWidth;
-			highWidth *= 2;
-			loaderObject->page.setViewportSize(QSize(highWidth, 10));
-		}
-		while (highWidth - lowWidth > 10) {
-			int t = lowWidth + (highWidth - lowWidth)/2;
-			loaderObject->page.setViewportSize(QSize(t, 10));
-			if (frame->scrollBarMaximum(Qt::Horizontal) > 0)
-				lowWidth = t;
-			else
-				highWidth = t;
-		}
-		loaderObject->page.setViewportSize(QSize(highWidth, 10));
-	}
-	loaderObject->page.mainFrame()->setScrollBarPolicy(Qt::Horizontal, Qt::ScrollBarAlwaysOff);
-	//Set the right height
-	if (settings.screenHeight > 0)
-		loaderObject->page.setViewportSize(QSize(highWidth, settings.screenHeight));
-	else
-		loaderObject->page.setViewportSize(QSize(highWidth, frame->contentsSize().height()));
 
-	QPainter painter;
-	QSvgGenerator generator;
-	QImage image;
+	// Set background colour
+	if (settings.transparent && (settings.fmt == "png" || settings.fmt == "svg"))
+		page.setBackgroundColor(Qt::transparent);
+	else
+		page.setBackgroundColor(Qt::white);
+
+	// Render via QWebEngineView (offscreen)
+	QWebEngineView view;
+	view.setAttribute(Qt::WA_DontShowOnScreen);
+	view.setPage(&page);
+	view.resize(screenWidth, screenHeight);
+	view.show();
+	QApplication::processEvents();
+
+	QPixmap fullPixmap = view.grab();
+	view.setPage(nullptr);  // Don't let the view take ownership of the page
+
+	loadProgress(75);
+
+	// Apply crop
+	if (settings.crop.left < 0) settings.crop.left = 0;
+	if (settings.crop.top < 0) settings.crop.top = 0;
+	QRect fullRect(0, 0, fullPixmap.width(), fullPixmap.height());
+	QRect cropRect = fullRect.intersected(QRect(
+		settings.crop.left,
+		settings.crop.top,
+		settings.crop.width > 0 ? settings.crop.width : fullPixmap.width(),
+		settings.crop.height > 0 ? settings.crop.height : fullPixmap.height()));
+
+	if (cropRect.width() == 0 || cropRect.height() == 0) {
+		emit out.error("Will not output an empty image");
+		fail();
+		return;
+	}
+
+	QPixmap pixmap = fullPixmap.copy(cropRect);
+
+	// Open output device
 	QFile file;
 	QBuffer buffer(&outputData);
-	QIODevice * dev = &file;
+	QIODevice * dev = nullptr;
 
-	bool openOk=true;
-	// output image
-	if (settings.out.isEmpty())
-		dev =  &buffer;
-	else if (settings.out != "-" ) {
+	if (settings.out.isEmpty()) {
+		buffer.open(QIODevice::WriteOnly);
+		dev = &buffer;
+	} else if (settings.out != "-") {
 		file.setFileName(settings.out);
-		openOk = file.open(QIODevice::WriteOnly);
+		if (!file.open(QIODevice::WriteOnly)) {
+			emit out.error("Could not write to output file");
+			fail();
+			return;
+		}
+		dev = &file;
 	} else {
 #ifdef Q_OS_WIN32
 		_setmode(_fileno(stdout), _O_BINARY);
 #endif
-		openOk = file.open(stdout, QIODevice::WriteOnly);
-    }
-
-	if (!openOk) {
-		emit out.error("Could not write to output file");
-		fail();
+		if (!file.open(stdout, QIODevice::WriteOnly)) {
+			emit out.error("Could not write to stdout");
+			fail();
+			return;
+		}
+		dev = &file;
 	}
 
-	if (settings.crop.left < 0) settings.crop.left = 0;
-	if (settings.crop.top < 0) settings.crop.top = 0;
-	if (settings.crop.width < 0) settings.crop.width = 1000000;
-	if (settings.crop.height < 0) settings.crop.height = 1000000;
-	QRect rect = QRect(QPoint(0,0), loaderObject->page.viewportSize()).intersected(
-		QRect(settings.crop.left,settings.crop.top,settings.crop.width,settings.crop.height));
-	if (rect.width() == 0 || rect.height() == 0) {
-		emit out.error("Will not output an empty image");
-		fail();
-	}
-
-	if (settings.fmt != "svg") {
-		image = QImage(rect.size(), QImage::Format_ARGB32_Premultiplied);
-		painter.begin(&image);
-	} else {
+	if (settings.fmt == "svg") {
+		// SVG: render via QSvgGenerator (basic, no WebEngine integration)
+		QSvgGenerator generator;
 		generator.setOutputDevice(dev);
-		generator.setSize(rect.size());
-		generator.setViewBox(QRect(QPoint(0,0),rect.size()));
-#ifdef __EXTENSIVE_WKHTMLTOPDF_QT_HACK__
-		generator.setViewBoxClip(true);
-#endif
-		painter.begin(&generator);
-	}
-
-	if (settings.transparent && (settings.fmt == "png" || settings.fmt == "svg")) {
-		QWebElement e = frame->findFirstElement("body");
-		e.setStyleProperty("background-color", "transparent");
-		e.setStyleProperty("background-image", "none");
-		QPalette pal = loaderObject->page.palette();
-		pal.setBrush(QPalette::Base, Qt::transparent);
-		loaderObject->page.setPalette(pal);
+		generator.setSize(pixmap.size());
+		generator.setViewBox(QRect(QPoint(0,0), pixmap.size()));
+		QPainter painter(&generator);
+		painter.drawPixmap(0, 0, pixmap);
+		painter.end();
 	} else {
-		painter.fillRect(QRect(QPoint(0,0),loaderObject->page.viewportSize()), Qt::white);
-	}
-	painter.translate(-rect.left(), -rect.top());
-	frame->render(&painter);
-	painter.end();
-
-	//loadProgress(30);
-	// perform filter(s)
-	//if (settings.crop.width > 0 && settings.crop.height > 0)
-	//	image=image.copy(settings.crop.left,settings.crop.top,settings.crop.width,settings.crop.height);
-	//loadProgress(50);
-	//if (settings.scale.width > 0 && settings.scale.height > 0) {
-		// todo: perhaps get more user options to change aspect ration and scaling mode?
-	//	image=image.scaled(settings.scale.width,settings.scale.height,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
-	//}
-	//loadProgress(80);
-
-	if (settings.fmt != "svg") {
-		QByteArray fmt=settings.fmt.toLatin1();
-		if (!image.save(dev,fmt.data(), settings.quality)) {
+		QByteArray fmt = settings.fmt.toLatin1();
+		if (!pixmap.save(dev, fmt.data(), settings.quality)) {
 			emit out.error("Could not save image");
 			fail();
+			return;
 		}
 	}
+
 	loadProgress(100);
 
 	currentPhase = 2;
@@ -232,7 +216,7 @@ void ImageConverterPrivate::pagesLoaded(bool ok) {
 	conversionDone = true;
 	emit out.finished(true);
 
-	qApp->exit(0); // quit qt's event handling
+	qApp->exit(0);
 }
 
 Converter & ImageConverterPrivate::outer() {

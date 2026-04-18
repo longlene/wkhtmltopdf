@@ -20,7 +20,7 @@
 
 #include "outputter.hh"
 #include "pdfcommandlineparser.hh"
-#include <QWebFrame>
+#include <QWebEnginePage>
 
 #define STRINGIZE_(x) #x
 #define STRINGIZE(x) STRINGIZE_(x)

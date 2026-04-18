@@ -22,6 +22,8 @@
 #define __PDFSETTINGS_HH__
 
 #include <QNetworkProxy>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QPrinter>
 #include <QString>
 #include <logging.hh>
@@ -51,7 +53,7 @@ struct DLL_PUBLIC Margin {
 struct DLL_PUBLIC Size {
 	Size();
 	//! What size paper should we use
-	QPrinter::PageSize pageSize;
+	QPageSize::PageSizeId pageSize;
 	//!Height of the page
 	UnitReal height;
 	//!Width of the page
@@ -95,8 +97,8 @@ struct DLL_PUBLIC PdfGlobal {
 	//! Should relative links be resolved or kept as-is
 	bool resolveRelativeLinks;
 
-	//! Should we orientate in landscape or portrate
-	QPrinter::Orientation orientation;
+	//! Should we orientate in landscape or portrait
+	QPageLayout::Orientation orientation;
 
 	//! Color or grayscale
 	QPrinter::ColorMode colorMode;
@@ -208,14 +210,14 @@ struct DLL_PUBLIC PdfObject {
 	bool set(const char * name, const QString & value);
 };
 
-DLL_PUBLIC QPrinter::PageSize strToPageSize(const char * s, bool * ok=0);
-DLL_PUBLIC QString pageSizeToStr(QPrinter::PageSize ps);
+DLL_PUBLIC QPageSize::PageSizeId strToPageSize(const char * s, bool * ok=0);
+DLL_PUBLIC QString pageSizeToStr(QPageSize::PageSizeId ps);
 
 DLL_PUBLIC UnitReal strToUnitReal(const char * s, bool * ok=0);
 DLL_PUBLIC QString unitRealToStr(const UnitReal & ur, bool * ok);
 
-DLL_PUBLIC QPrinter::Orientation strToOrientation(const char * s, bool * ok=0);
-DLL_PUBLIC QString orientationToStr(QPrinter::Orientation o);
+DLL_PUBLIC QPageLayout::Orientation strToOrientation(const char * s, bool * ok=0);
+DLL_PUBLIC QString orientationToStr(QPageLayout::Orientation o);
 
 DLL_PUBLIC QPrinter::PrinterMode strToPrinterMode(const char * s, bool * ok=0);
 DLL_PUBLIC QString printerModeToStr(QPrinter::PrinterMode o);

@@ -21,7 +21,8 @@
 
 #include "converter_p.hh"
 #include "multipageloader.hh"
-#include <QWebFrame>
+#include <QWebEngineScript>
+#include <QWebEngineSettings>
 #include <qapplication.h>
 
 #ifdef QT4_STATICPLUGIN_TEXTCODECS
@@ -35,26 +36,34 @@ Q_IMPORT_PLUGIN(qtwcodecs)
 namespace wkhtmltopdf {
 
 
-void ConverterPrivate::updateWebSettings(QWebSettings * ws, const settings::Web & s) const {
+void ConverterPrivate::updateWebSettings(QWebEnginePage * page, const settings::Web & s) const {
+	QWebEngineSettings * ws = page->settings();
 	if (!s.defaultEncoding.isEmpty())
 		ws->setDefaultTextEncoding(s.defaultEncoding);
-#ifdef  __EXTENSIVE_WKHTMLTOPDF_QT_HACK__
-	if (!s.enableIntelligentShrinking) {
-		ws->setPrintingMaximumShrinkFactor(1.0);
-		ws->setPrintingMinimumShrinkFactor(1.0);
+	// Java is not supported in Qt WebEngine (Chromium dropped Java plugin support)
+	ws->setAttribute(QWebEngineSettings::JavascriptEnabled, s.enableJavascript);
+	ws->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
+	ws->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard, false);
+	ws->setFontSize(QWebEngineSettings::MinimumFontSize, s.minimumFontSize);
+	ws->setAttribute(QWebEngineSettings::ShowScrollBars, false);
+	ws->setAttribute(QWebEngineSettings::PrintElementBackgrounds, s.background);
+	ws->setAttribute(QWebEngineSettings::AutoLoadImages, s.loadImages);
+	ws->setAttribute(QWebEngineSettings::PluginsEnabled, s.enablePlugins);
+	if (!s.userStyleSheet.isEmpty()) {
+		// Qt6 WebEngine: inject stylesheet via QWebEngineScript
+		QString cssUrl = MultiPageLoader::guessUrlFromString(s.userStyleSheet).toString();
+		QWebEngineScript script;
+		script.setName("wk_userstylesheet");
+		script.setSourceCode(QString(
+			"(function(){"
+			"var l=document.createElement('link');"
+			"l.rel='stylesheet';l.href='%1';"
+			"document.head.appendChild(l);"
+			"})()").arg(cssUrl));
+		script.setInjectionPoint(QWebEngineScript::DocumentReady);
+		script.setWorldId(QWebEngineScript::MainWorld);
+		page->scripts().insert(script);
 	}
-#endif
-	ws->setAttribute(QWebSettings::JavaEnabled, s.enablePlugins);
-	ws->setAttribute(QWebSettings::JavascriptEnabled, s.enableJavascript);
-	ws->setAttribute(QWebSettings::JavascriptCanOpenWindows, false);
-	ws->setAttribute(QWebSettings::JavascriptCanAccessClipboard, false);
-	ws->setFontSize(QWebSettings::MinimumFontSize, s.minimumFontSize);
-	//Newer versions of QT have even more settings to change
-	ws->setAttribute(QWebSettings::PrintElementBackgrounds, s.background);
-	ws->setAttribute(QWebSettings::AutoLoadImages, s.loadImages);
-	ws->setAttribute(QWebSettings::PluginsEnabled, s.enablePlugins);
-	if (!s.userStyleSheet.isEmpty())
-		ws->setUserStyleSheetUrl(MultiPageLoader::guessUrlFromString(s.userStyleSheet));
 }
 
 void ConverterPrivate::fail() {

@@ -20,20 +20,20 @@
 
 #include "commandlineparserbase.hh"
 #include "outputter.hh"
-#include <qwebframe.h>
+#include <QRegularExpression>
 
 bool ahsort(const ArgHandler * a, const ArgHandler * b) {
-	QRegExp e("^(no|enable|disable|include-in|exclude-from)-");
+	QRegularExpression e("^(no|enable|disable|include-in|exclude-from)-");
 	QString x=a->longName;
 	QString y=b->longName;
 	x.remove(e);
 	y.remove(e);
 	if (x == y) {
-		QRegExp e("^no-");
+		QRegularExpression e2("^no-");
 		x=a->longName;
 		y=b->longName;
-		x.replace(e,"zzzz");
-		y.replace(e,"zzzz");
+		x.replace(e2,"zzzz");
+		y.replace(e2,"zzzz");
 	}
 	return x < y;
 }
@@ -56,7 +56,7 @@ void CommandLineParserBase::outputSwitches(Outputter * o, bool extended, bool do
 			if (!extended && handler->extended) continue;
 			display.push_back(handler);
 		}
-		qSort(display.begin(), display.end(), ahsort);
+		std::sort(display.begin(), display.end(), ahsort);
 		if (display.size() == 0) continue;
 		o->beginSection(section);
 		if (!sectionDesc[section].isEmpty()) {

@@ -21,7 +21,6 @@
 #include "imagecommandlineparser.hh"
 #include "progressfeedback.hh"
 #include <QApplication>
-#include <QWebFrame>
 #include <imageconverter.hh>
 #include <imagesettings.hh>
 #include <utilities.hh>

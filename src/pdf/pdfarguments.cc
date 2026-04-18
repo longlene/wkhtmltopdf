@@ -21,6 +21,8 @@
 #include "arghandler.inl"
 #include "pdfcommandlineparser.hh"
 #include <QFile>
+#include <QPageLayout>
+#include <QPageSize>
 #include <qglobal.h>
 #include <pdfconverter.hh>
 
@@ -92,11 +94,11 @@ struct UnitRealTM: public SomeSetterTM<UnitReal> {
  */
 typedef SomeSetter<UnitRealTM> UnitRealSetter;
 
-struct PageSizeTM: public SomeSetterTM<QPrinter::PageSize> {
-	static QPrinter::PageSize strToT(const char * val, bool &ok) {
+struct PageSizeTM: public SomeSetterTM<QPageSize::PageSizeId> {
+	static QPageSize::PageSizeId strToT(const char * val, bool &ok) {
 		return strToPageSize(val, &ok);
 	}
-	static QString TToStr(const QPrinter::PageSize & s, bool & ok) {
+	static QString TToStr(const QPageSize::PageSizeId & s, bool & ok) {
 		ok=true;
 		return pageSizeToStr(s);
 	}
@@ -106,11 +108,11 @@ struct PageSizeTM: public SomeSetterTM<QPrinter::PageSize> {
  */
 typedef SomeSetter<PageSizeTM> PageSizeSetter;
 
-struct OrientationTM: public SomeSetterTM<QPrinter::Orientation> {
-	static QPrinter::Orientation strToT(const char * val, bool &ok) {
+struct OrientationTM: public SomeSetterTM<QPageLayout::Orientation> {
+	static QPageLayout::Orientation strToT(const char * val, bool &ok) {
 		return strToOrientation(val, &ok);
 	}
-	static QString TToStr(const QPrinter::Orientation & o, bool & ok) {
+	static QString TToStr(const QPageLayout::Orientation & o, bool & ok) {
 		ok=true;
 		return orientationToStr(o);
 	}

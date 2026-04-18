@@ -20,7 +20,6 @@
 
 #include "outputter.hh"
 #include "pdfcommandlineparser.hh"
-#include <qwebframe.h>
 
 using namespace wkhtmltopdf::settings;
 /*!

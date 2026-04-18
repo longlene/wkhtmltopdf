@@ -32,9 +32,9 @@
 #include <QMutex>
 #include <QPainter>
 #include <QPrinter>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QWaitCondition>
-#include <QWebPage>
+#include <QWebEnginePage>
 #include <qnetworkreply.h>
 #ifdef __EXTENSIVE_WKHTMLTOPDF_QT_HACK__
 #include <QWebElement>
@@ -45,11 +45,11 @@ namespace wkhtmltopdf {
 
 class DLL_LOCAL PageObject {
 public:
-	static QMap<QWebPage *, PageObject *> webPageToObject;
+	static QMap<QWebEnginePage *, PageObject *> webPageToObject;
 
 	settings::PdfObject settings;
 	LoaderObject * loaderObject;
-	QWebPage * page;
+	QWebEnginePage * page;
 	QString data;
 	int number;
 
@@ -62,16 +62,16 @@ public:
     // height length to reserve for footer when printing page
     double footerReserveHeight;
     // keeps preloaded header to calculate header height
-    QWebPage * measuringHeader;
+    QWebEnginePage * measuringHeader;
     // keeps preloaded footer to calculate header height
-    QWebPage * measuringFooter;
+    QWebEnginePage * measuringFooter;
     // webprinter instance
     QWebPrinter *web_printer;
 #endif
 
 	int firstPageNumber;
-	QList<QWebPage *> headers;
-	QList<QWebPage *> footers;
+	QList<QWebEnginePage *> headers;
+	QList<QWebEnginePage *> footers;
 	int pageCount;
 	TempFile tocFile;
 
@@ -162,12 +162,12 @@ private:
 	void endPage(PageObject & object, bool hasHeaderFooter, int objectPage,  int pageNumber);
 	void fillParms(QHash<QString, QString> & parms, int page, const PageObject & object);
 	QString hfreplace(const QString & q, const QHash<QString, QString> & parms);
-	QWebPage * loadHeaderFooter(QString url, const QHash<QString, QString> & parms, const settings::PdfObject & ps);
-    qreal calculateHeaderHeight(PageObject & object, QWebPage & header);
+	QWebEnginePage * loadHeaderFooter(QString url, const QHash<QString, QString> & parms, const settings::PdfObject & ps);
+    qreal calculateHeaderHeight(PageObject & object, QWebEnginePage & header);
 
 #endif
-	QWebPage * currentHeader;
-	QWebPage * currentFooter;
+	QWebEnginePage * currentHeader;
+	QWebEnginePage * currentFooter;
     QPrinter * createPrinter(const QString & tempFile);
 
 #ifdef __EXTENSIVE_WKHTMLTOPDF_QT_HACK__
@@ -175,8 +175,8 @@ private:
 	void preprocessPage(PageObject & obj);
 	void spoolPage(int page);
 	void spoolTo(int page);
-	void handleHeader(QWebPage * frame, int page);
-	void handleFooter(QWebPage * frame, int page);
+	void handleHeader(QWebEnginePage * frame, int page);
+	void handleFooter(QWebEnginePage * frame, int page);
 	void beginPrintObject(PageObject & obj);
 	void endPrintObject(PageObject & obj);
 #endif

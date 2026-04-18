@@ -24,24 +24,18 @@
 #include <QFile>
 #include <QObject>
 #include <QUrl>
-#if QT_VERSION >= 0x050000
-#include <QtWebKitWidgets>
-#else
-#include <QWebPage>
-#endif
+#include <QtWebEngineWidgets>
 #include <loadsettings.hh>
 
 #include <dllbegin.inc>
 namespace wkhtmltopdf {
 
-class DLL_LOCAL MyQWebPage;
-
 class DLL_LOCAL LoaderObject {
 public:
-	QWebPage & page;
+	QWebEnginePage & page;
 	bool skip;
 
-	LoaderObject(QWebPage & page);
+	LoaderObject(QWebEnginePage & page);
 };
 
 class DLL_LOCAL MultiPageLoaderPrivate;
@@ -70,7 +64,6 @@ signals:
 private:
 	MultiPageLoaderPrivate * d;
 	friend class MultiPageLoaderPrivate;
-	friend class MyQWebPage;
 	friend class ResourceObject;
 };
 

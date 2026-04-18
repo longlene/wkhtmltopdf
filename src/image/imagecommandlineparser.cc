@@ -20,7 +20,6 @@
 
 #include "imagecommandlineparser.hh"
 #include "outputter.hh"
-#include <qwebframe.h>
 
 /*!
   \file commandlineparser.hh
